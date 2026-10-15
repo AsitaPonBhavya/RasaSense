@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dravya Identification</h1>
+<p class="sub">Dip the e-tongue in a herbal extract → 8-channel fingerprint → AI identifies the herb, estimates its six Rasas and checks for adulteration.</p>
+
+<div class="grid">
+  <div>
+    <div class="card">
+      <h2>🧪 Sample in beaker</h2>
+      <label>Herb extract (simulator)</label>
+      <select id="herb"></select>
+      <div id="manual">
+        <label>Adulterant</label>
+        <select id="adulterant"></select>
+        <label>Extract strength: <b id="concVal">1.00×</b></label>
+        <input type="range" id="conc" min="0.3" max="1.5" step="0.05" value="1">
+      </div>
+      <button class="btn block" id="analyzeBtn">🔬 Analyze sample</button>
+      <p class="hint">Averages 10 readings, temperature-compensates TDS, then runs the classifier, Rasa model and adulteration check.</p>
+    </div>
+
+    <div class="card">
+      <h2>📡 Live sensor array</h2>
+      <div class="sensors" id="sensors"></div>
+      <div style="height:150px;margin-top:14px"><canvas id="liveChart"></canvas></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card" id="resultCard">
+      <div class="empty" id="empty">
+        <div class="big">🌿</div>
+        <p>Choose a sample and press <b>Analyze</b>.<br>Try <b>Mystery sample</b> to let the AI guess blind.</p>
+      </div>
+      <div id="result" style="display:none">
+        <div class="result-head">
+          <div>
+            <div class="latin" style="font-style:normal">Identified Dravya</div>
+            <div class="dravya" id="rDravya"></div>
+            <div class="latin" id="rLatin"></div>
+            <span class="badge" id="rStatus"></span>
+          </div>
+          <div class="ring">
+            <svg width="104" height="104"><circle cx="52" cy="52" r="44" stroke="rgba(255,255,255,.08)" stroke-width="10" fill="none"/>
+              <circle id="ringArc" cx="52" cy="52" r="44" stroke="#00ff9c" stroke-width="10" fill="none" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="276.5" style="transition:stroke-dashoffset .8s ease"/></svg>
+            <div class="pct" id="rConf"></div>
+            <div class="lbl">AI confidence</div>
+          </div>
+        </div>
+        <div id="reveal" class="alerts" style="margin-top:14px"></div>
+      </div>
+    </div>
+
+    <div class="grid2" id="detail" style="display:none">
+      <div class="card">
+        <h2>👅 Shad-Rasa profile</h2>
+        <div style="height:280px"><canvas id="rasaChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>🛡️ Quality assessment</h2>
+        <div class="row"><span>Quality score</span><b id="rQuality"></b></div>
+        <div class="bar"><div id="qBar"></div></div>
+        <div class="row"><span>Fingerprint deviation</span><span id="rDist"></span></div>
+        <div class="bar"><div id="dBar"></div></div>
+        <h2 style="margin-top:20px">Closest matches</h2>
+        <div id="top3"></div>
+        <ul class="alerts" id="alerts"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const UNITS = {ph: ['pH', ''], tds: ['TDS', 'ppm'], optical: ['Optical', 'AU'], temp: ['Temp', '°C'],
+               e1: ['E1 Bitter', 'mV'], e2: ['E2 Sweet', 'mV'], e3: ['E3 Pungent', 'mV'], e4: ['E4 Astringent', 'mV']};
+const $ = id => document.getElementById(id);
+let meta, rasaChart;
+
+$('sensors').innerHTML = Object.entries(UNITS).map(([k, [n, u]]) =>
+  `<div class="sensor"><div class="k">${n}</div><span class="v" id="s_${k}">–</span><span class="u">${u}</span></div>`).join('');
+
+const live = new Chart($('liveChart'), {
+  type: 'line',
+  data: {labels: [], datasets: ['e1', 'e2', 'e3', 'e4'].map((k, i) => ({
+    label: UNITS[k][0], data: [], borderWidth: 2, pointRadius: 0, tension: .35,
+    borderColor: ['#ff8a65', '#f48fb1', '#ffd54f', '#81c784'][i]}))},
+  options: {animation: false, maintainAspectRatio: false, scales: {x: {display: false}, y: {title: {display: true, text: 'mV'}}},
+            plugins: {legend: {labels: {boxWidth: 10, font: {size: 10}}}}}
+});
+
+function params() {
+  return {herb: $('herb').value, adulterant: $('adulterant').value, conc: +$('conc').value};
+}
+
+async function poll() {
+  const {reading} = await api('/api/reading?' + new URLSearchParams(params()));
+  for (const k in UNITS) $('s_' + k).textContent = reading[k].toFixed(k === 'tds' ? 0 : k === 'optical' ? 3 : 1);
+  live.data.labels.push('');
+  ['e1', 'e2', 'e3', 'e4'].forEach((k, i) => live.data.datasets[i].data.push(reading[k]));
+  if (live.data.labels.length > 40) { live.data.labels.shift(); live.data.datasets.forEach(d => d.data.shift()); }
+  live.update();
+}
+
+$('conc').oninput = () => $('concVal').textContent = (+$('conc').value).toFixed(2) + '×';
+$('herb').onchange = async () => {
+  $('manual').style.display = $('herb').value === 'mystery' ? 'none' : '';
+  if ($('herb').value === 'mystery') await api('/api/mystery', {});
+};
+
+$('analyzeBtn').onclick = async () => {
+  const btn = $('analyzeBtn');
+  btn.disabled = true; btn.textContent = '⏳ Sensing… (10 readings)';
+  const [r] = await Promise.all([api('/api/analyze', params()), new Promise(ok => setTimeout(ok, 1400))]);
+  btn.disabled = false; btn.textContent = '🔬 Analyze sample';
+  if (r.error) return alert(r.error);
+  show(r);
+  if ($('herb').value === 'mystery') api('/api/mystery', {});   // next mystery is fresh
+};
+
+function show(r) {
+  $('empty').style.display = 'none'; $('result').style.display = ''; $('detail').style.display = '';
+  $('rDravya').textContent = r.status === 'UNKNOWN DRAVYA' ? 'Unidentified' : r.status === 'NO SAMPLE' ? 'Blank' : r.dravya;
+  $('rLatin').textContent = r.status === 'UNKNOWN DRAVYA' ? `nearest match: ${r.dravya}` : r.status === 'NO SAMPLE' ? 'distilled water' : r.latin;
+  const st = $('rStatus');
+  st.textContent = {'WITHIN THRESHOLD': '✔ Within threshold · Authentic', 'ADULTERATION SUSPECTED': '⚠ Adulteration suspected',
+                    'LOW CONFIDENCE': '? Low confidence', 'UNKNOWN DRAVYA': '✖ Unknown Dravya · not in library', 'NO SAMPLE': '○ No sample detected'}[r.status];
+  st.className = 'badge ' + {'WITHIN THRESHOLD': 'ok', 'ADULTERATION SUSPECTED': 'bad', 'LOW CONFIDENCE': 'warn', 'UNKNOWN DRAVYA': 'bad', 'NO SAMPLE': 'warn'}[r.status];
+
+  const c = r.confidence;
+  $('rConf').textContent = Math.round(c * 100) + '%';
+  $('ringArc').style.strokeDashoffset = 276.5 * (1 - c);
+  $('ringArc').style.stroke = c > .8 ? '#00ff9c' : c > .6 ? '#ffc857' : '#ff6b6b';
+
+  const qc = r.quality >= 60 ? '#00ff9c' : r.quality >= 30 ? '#ffc857' : '#ff6b6b';
+  $('rQuality').textContent = r.quality.toFixed(0) + ' / 100';
+  $('qBar').style.width = r.quality + '%'; $('qBar').style.background = qc;
+  const dr = r.distance / r.limit;
+  $('rDist').textContent = `${r.distance} (limit ${r.limit})`;
+  $('dBar').style.width = Math.min(100, dr * 50) + '%';
+  $('dBar').style.background = dr > 1 ? '#ff6b6b' : '#4facfe';
+
+  $('top3').innerHTML = r.top3.map(t => `<div class="row"><span>${t.herb}</span><span>${(t.p * 100).toFixed(0)}%</span></div>
+    <div class="bar"><div style="width:${t.p * 100}%;background:#4facfe"></div></div>`).join('');
+  $('alerts').innerHTML = r.alerts.map(a => `<li>${a}</li>`).join('');
+  $('reveal').innerHTML = r.reveal ? `<li class="info">🎭 Mystery revealed: <b>${r.reveal.herb}</b> with <b>${r.reveal.adulterant}</b></li>` : '';
+
+  const labels = meta.rasas.map((s, i) => `${s} (${meta.rasa_en[i]})`);
+  const ds = [{label: 'Measured', data: r.rasa, backgroundColor: 'rgba(0,255,156,.2)', borderColor: '#00ff9c', pointBackgroundColor: '#00ff9c'}];
+  if (r.reference_rasa) ds.push({label: `${r.dravya} reference`, data: r.reference_rasa, borderDash: [5, 4],
+    backgroundColor: 'rgba(79,172,254,.06)', borderColor: '#4facfe', pointRadius: 0});
+  if (rasaChart) rasaChart.destroy();
+  rasaChart = new Chart($('rasaChart'), {type: 'radar', data: {labels, datasets: ds},
+    options: {maintainAspectRatio: false, scales: {r: {min: 0, max: 1, ticks: {display: false},
+      grid: {color: 'rgba(255,255,255,.1)'}, angleLines: {color: 'rgba(255,255,255,.1)'}, pointLabels: {font: {size: 10}}}},
+      plugins: {legend: {position: 'bottom', labels: {boxWidth: 10}}}}});
+}
+
+api('/api/meta').then(m => {
+  meta = m;
+  $('herb').innerHTML = '<option value="mystery">🎭 Mystery sample (random herb ± adulterant)</option>' +
+    m.herbs.map(h => `<option value="${h.name}">${h.name} — ${h.latin}</option>`).join('') +
+    '<option value="">Distilled water (blank)</option>';
+  $('herb').value = 'Tulsi';
+  $('adulterant').value = 'none';
+  $('adulterant').innerHTML = Object.entries(m.adulterants).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+  setInterval(poll, 700); poll();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rasa-Sense · E-Tongue</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/chart.umd.min.js"></script>
+  <script>
+    Chart.defaults.color = '#9bb8a7';
+    Chart.defaults.font.family = 'Poppins';
+    Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
+    const api = (url, body) => fetch(url, body === undefined ? {} : {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    }).then(r => r.json());
+  </script>
+</head>
+<body>
+<nav>
+  <span class="brand">👅 Rasa-Sense <small>E-Tongue for Dravya ID</small></span>
+  <a href="/" class="{{ 'active' if page == 'analyze' }}">Analyze</a>
+  <a href="/collect" class="{{ 'active' if page == 'collect' }}">Calibrate</a>
+  <a href="/train" class="{{ 'active' if page == 'train' }}">Train Model</a>
+  <a href="/threshold" class="{{ 'active' if page == 'threshold' }}">Threshold</a>
+  <a href="/database" class="{{ 'active' if page == 'database' }}">Database</a>
+  <span class="source" id="sourceBadge">● Simulated sensor array</span>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+<script>
+  api('/api/meta').then(m => {
+    if (m.source === 'ESP32') {
+      const b = document.getElementById('sourceBadge');
+      b.textContent = '● ESP32 live'; b.classList.add('live');
+    }
+  });
+</script>
+</body>
+</html>

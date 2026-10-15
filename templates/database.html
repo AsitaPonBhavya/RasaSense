@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Sample Database</h1>
+<p class="sub">Every analysis and calibration fingerprint is logged. Export as CSV, or query the JSON API (<code>/api/analyses</code>, <code>/api/samples</code>) to sync with a cloud database.</p>
+
+<div class="sensors" style="margin-bottom:20px" id="stats"></div>
+
+<div class="card">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+    <h2 style="margin:0;margin-right:auto">🧾 Analysis log</h2>
+    <a class="btn alt" href="/export/analyses.csv" style="text-decoration:none;padding:9px 16px;font-size:.85rem">⬇ Analyses CSV</a>
+    <a class="btn alt" href="/export/samples.csv" style="text-decoration:none;padding:9px 16px;font-size:.85rem">⬇ Calibration CSV</a>
+    <button class="btn ghost" id="reset" style="padding:9px 16px;font-size:.85rem">↺ Reset demo data</button>
+  </div>
+  <div class="table-wrap">
+    <table><thead><tr><th>#</th><th>Time</th><th>Sample</th><th>Identified</th><th>Conf.</th><th>Quality</th><th>Status</th></tr></thead>
+      <tbody id="tbl"></tbody></table>
+  </div>
+  <p class="empty" id="none" style="display:none;padding:30px">No analyses yet. Run one on the Analyze page.</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+async function load() {
+  const [rows, m] = await Promise.all([api('/api/analyses'), api('/api/meta')]);
+  const flagged = rows.filter(r => r.status === 'ADULTERATION SUSPECTED').length;
+  const cal = Object.values(m.calibration_counts).reduce((a, b) => a + b, 0);
+  $('stats').innerHTML = [['Analyses', rows.length], ['Flagged', flagged], ['Calibration samples', cal],
+    ['Dravyas known', m.model ? m.model.classes.length : 0]]
+    .map(([k, v]) => `<div class="sensor"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  $('none').style.display = rows.length ? 'none' : '';
+  const cls = s => s === 'WITHIN THRESHOLD' ? 'st-ok' : (s === 'ADULTERATION SUSPECTED' || s === 'UNKNOWN DRAVYA') ? 'st-bad' : 'st-warn';
+  $('tbl').innerHTML = rows.map(r => `<tr><td>${r.id}</td><td>${r.ts}</td><td>${r.sample_desc}</td><td><b>${r.dravya}</b></td>
+    <td>${(r.confidence * 100).toFixed(0)}%</td><td>${r.quality.toFixed(0)}</td><td class="${cls(r.status)}">${r.status}</td></tr>`).join('');
+}
+$('reset').onclick = async () => {
+  $('reset').disabled = true;
+  await api('/api/reset', {});
+  $('reset').disabled = false;
+  load();
+};
+load();
+</script>
+{% endblock %}

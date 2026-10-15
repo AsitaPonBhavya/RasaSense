@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width:700px;margin:0 auto">
+  <h1 style="text-align:center;margin-bottom:25px">🧠 Model Training Center</h1>
+
+  <div class="card">
+    <h2 style="text-align:center">What happens here?</h2>
+    <p style="text-align:center;line-height:1.7;color:#cceedd">
+      • Uses all collected herb data from the database<br>
+      • Trains ML model using pH, TDS, Optical &amp; electrode array<br>
+      • Random Forest classifier + Rasa regressor + adulteration limits<br>
+      • Old model will be replaced; new model is used for prediction
+    </p>
+
+    <div class="sensors" style="grid-template-columns:repeat(3,1fr);margin:20px 0">
+      <div class="sensor"><div class="k">Model status</div><div class="v" id="statusText" style="font-size:.95rem"></div></div>
+      <div class="sensor"><div class="k">Hold-out accuracy</div><div class="v" id="acc">–</div></div>
+      <div class="sensor"><div class="k">Training samples</div><div class="v" id="nSamples">–</div></div>
+    </div>
+    <div class="hint" id="classes"></div>
+
+    <div style="text-align:center;margin-top:25px">
+      <button class="btn" id="trainBtn" onclick="trainModel()">🚀 Make / Update Model</button>
+    </div>
+
+    <div id="loader" style="display:none;text-align:center;margin-top:20px">
+      <p style="color:#9cffbf;font-weight:600">Training model... please wait ⏳</p>
+    </div>
+  </div>
+</div>
+
+<script>
+function render(m, justTrained) {
+  const s = document.getElementById('statusText');
+  if (!m) { s.innerHTML = '❌ Not trained'; s.className = 'status-fail'; return; }
+  s.innerHTML = justTrained ? '✔ Trained just now' : '✔ Trained';
+  s.className = 'status-ok';
+  document.getElementById('acc').textContent = (m.accuracy * 100).toFixed(1) + '%';
+  document.getElementById('nSamples').textContent = m.n_samples;
+  document.getElementById('classes').innerHTML =
+    `<b>Recognises ${m.classes.length} Dravyas:</b> ${m.classes.join(', ')}<br>Last trained: ${m.trained_at}`;
+}
+
+function trainModel() {
+  document.getElementById("loader").style.display = "block";
+  document.getElementById("trainBtn").disabled = true;
+
+  Promise.all([fetch("/make_model", { method: "POST" }).then(res => res.json()), new Promise(ok => setTimeout(ok, 1500))])
+    .then(([data]) => {
+      document.getElementById("loader").style.display = "none";
+      document.getElementById("trainBtn").disabled = false;
+      if (data.error) throw data.error;
+      render(data, true);
+    })
+    .catch(() => {
+      document.getElementById("loader").style.display = "none";
+      document.getElementById("statusText").innerHTML = "❌ Training failed";
+      document.getElementById("statusText").className = "status-fail";
+      document.getElementById("trainBtn").disabled = false;
+    });
+}
+
+api('/api/meta').then(m => render(m.model, false));
+</script>
+{% endblock %}

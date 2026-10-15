@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Calibrate with Authenticated Samples</h1>
+<p class="sub">Record fingerprints from pharmacopoeia-verified reference herbs. Every sample goes into the database the model learns from.</p>
+
+<div class="grid">
+  <div class="card">
+    <h2>🌿 Add reference samples</h2>
+    <label>Authenticated herb</label>
+    <select id="label"></select>
+    <label>Number of readings</label>
+    <input type="number" id="n" value="40" min="1" max="100">
+    <button class="btn block" id="go">📥 Record samples</button>
+    <p class="hint" id="msg"></p>
+  </div>
+  <div class="card">
+    <h2>📚 Reference library</h2>
+    <p class="hint" style="margin-top:0">Herbs the database has calibration data for. <span style="color:var(--warn)">Highlighted</span> herbs have no data yet, so the AI can't recognise them until you calibrate and retrain.</p>
+    <div class="chips" id="chips"></div>
+    <div style="height:260px;margin-top:20px"><canvas id="countChart"></canvas></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let chart;
+function refresh() {
+  api('/api/meta').then(m => {
+    if (!$('label').options.length)
+      $('label').innerHTML = m.herbs.map(h => `<option>${h.name}</option>`).join('');
+    const c = m.calibration_counts;
+    $('chips').innerHTML = m.herbs.map(h => `<span class="chip ${c[h.name] ? '' : 'new'}">${h.name} · ${c[h.name] || 0}</span>`).join('');
+    const names = m.herbs.map(h => h.name);
+    if (chart) chart.destroy();
+    chart = new Chart($('countChart'), {type: 'bar',
+      data: {labels: names, datasets: [{label: 'Calibration samples', data: names.map(n => c[n] || 0),
+        backgroundColor: names.map(n => c[n] ? 'rgba(0,255,156,.5)' : 'rgba(255,200,87,.6)'), borderRadius: 6}]},
+      options: {maintainAspectRatio: false, plugins: {legend: {display: false}}}});
+  });
+}
+$('go').onclick = async () => {
+  $('go').disabled = true; $('msg').textContent = 'Recording…';
+  const r = await api('/api/collect', {label: $('label').value, n: +$('n').value});
+  $('go').disabled = false;
+  $('msg').innerHTML = r.error ? r.error :
+    `✔ Added ${r.added} readings for <b>${r.label}</b>. Go to <a href="/train" style="color:var(--accent)">Train Model</a> to update the AI.`;
+  refresh();
+};
+refresh();
+</script>
+{% endblock %}

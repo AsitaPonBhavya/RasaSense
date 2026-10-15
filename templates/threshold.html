@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Rasa Threshold Detection</h1>
+<p class="sub">Automated serial dilution: the extract is halved 12 times and each step measured. The threshold is the lowest concentration where a taste channel stays above the limit of detection (blank mean + 3σ).</p>
+
+<div class="grid">
+  <div class="card">
+    <h2>⚗️ Dilution study</h2>
+    <label>Herb</label>
+    <select id="herb"></select>
+    <label>Stock concentration (mg/mL)</label>
+    <input type="number" id="stock" value="10" min="0.1" step="0.5">
+    <button class="btn block" id="go">▶ Run dilution series</button>
+    <div class="table-wrap" style="margin-top:20px">
+      <table><thead><tr><th>Rasa</th><th>Sensor</th><th>Threshold</th></tr></thead><tbody id="tbl"></tbody></table>
+    </div>
+    <p class="hint">“—” means that Rasa is not characteristic of this herb.</p>
+  </div>
+  <div class="card">
+    <h2>📉 Dose–response curves</h2>
+    <div style="height:420px"><canvas id="chart"></canvas></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const COLORS = ['#f48fb1', '#ffd54f', '#90caf9', '#ff8a65', '#81c784', '#ce93d8'];
+let chart;
+api('/api/meta').then(m => {
+  $('herb').innerHTML = m.herbs.map(h => `<option>${h.name}</option>`).join('');
+  $('herb').value = 'Amla';
+  run();
+});
+async function run() {
+  $('go').disabled = true;
+  const r = await api(`/api/threshold?herb=${$('herb').value}&stock=${$('stock').value}`);
+  $('go').disabled = false;
+  $('tbl').innerHTML = r.channels.map((c, i) => `<tr><td><span style="color:${COLORS[i]}">●</span> ${c.rasa} (${c.en})</td>
+    <td>${c.channel.toUpperCase()}</td><td>${c.threshold_mg_ml == null ? '—' : '<b>' + c.threshold_mg_ml + '</b> mg/mL'}</td></tr>`).join('');
+  // Normalise each channel by its own LOD so all curves share one axis (y = 1 is the detection limit).
+  const ds = r.channels.map((c, i) => ({label: c.en, data: c.signal.map((s, j) => ({x: r.concentrations[j], y: Math.max(s / c.lod_signal, 0.1)})),
+    borderColor: COLORS[i], backgroundColor: COLORS[i], tension: 0, pointRadius: 3}));
+  ds.push({label: 'Limit of detection', data: [{x: r.concentrations.at(-1), y: 1}, {x: r.concentrations[0], y: 1}],
+    borderColor: '#ff6b6b', borderDash: [6, 5], pointRadius: 0});
+  if (chart) chart.destroy();
+  chart = new Chart($('chart'), {type: 'line', data: {datasets: ds}, options: {maintainAspectRatio: false, parsing: false,
+    scales: {x: {type: 'logarithmic', title: {display: true, text: 'Concentration (mg/mL, log)'}},
+             y: {type: 'logarithmic', min: 0.1, title: {display: true, text: 'Signal / LOD (log)'}}},
+    plugins: {legend: {position: 'bottom', labels: {boxWidth: 10}}}}});
+}
+$('go').onclick = run;
+</script>
+{% endblock %}
